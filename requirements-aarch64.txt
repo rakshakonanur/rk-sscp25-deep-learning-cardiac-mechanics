@@ -1,0 +1,8 @@
+cardiac-geometriesx
+fenicsx-pulse
+fenicsx-ldrb
+ukb-atlas
+https://github.com/scientificcomputing/vtk-aarch64/releases/download/v9.4.2-py3.12-more-flags/vtk-9.4.2-cp312-cp312-linux_aarch64.whl
+pyvista
+pandas
+meshio

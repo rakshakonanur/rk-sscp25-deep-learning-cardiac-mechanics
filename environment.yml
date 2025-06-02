@@ -1,0 +1,15 @@
+name: sscp25-deep-learning-cardiac-mechanics
+channels:
+  - conda-forge
+dependencies:
+  - fenics-dolfinx
+  - python
+  - pyvista
+  - fenicsx-ldrb
+  - pandas
+  - meshio
+  - cardiac-geometriesx
+  - pip
+  - pip:
+    - ukb-atlas
+  
