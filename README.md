@@ -39,17 +39,21 @@ python3 -m pip install -r requirements.txt
 
 ## Getting started
 Create a geometry with
-```
+```bash
 python3 create_geometry.py
 ```
 
 Run a simulation with
+```bash
+python3 run_simulation_clipped.py
 ```
-python3 run_simulation.py
+or 
+```bash
+python3 run_simulation_full.py
 ```
 
 Post-process the results with
-```
+```bash
 python3 postprocess.py
 ```
 

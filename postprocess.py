@@ -9,7 +9,9 @@ import cardiac_geometries
 
 
 def main(
-    mode: int = -1, datadir: Path = Path("data"), resultsdir: Path = Path("results")
+    mode: int = -1,
+    datadir: Path = Path("data-clipped"),
+    resultsdir: Path = Path("results-clipped"),
 ):
     geodir = Path(datadir) / f"mode_{mode}"
     outdir = Path(resultsdir) / f"mode_{mode}"

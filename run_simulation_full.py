@@ -12,7 +12,9 @@ import cardiac_geometries.geometry
 
 
 def main(
-    mode: int = -1, datadir: Path = Path("data"), resultsdir: Path = Path("results")
+    mode: int = -1,
+    datadir: Path = Path("data-full"),
+    resultsdir: Path = Path("results-full"),
 ):
     geodir = Path(datadir) / f"mode_{mode}"
     outdir = Path(resultsdir) / f"mode_{mode}"
@@ -32,9 +34,10 @@ def main(
     Ta = fenicsx_pulse.Variable(
         dolfinx.fem.Constant(geometry.mesh, dolfinx.default_scalar_type(0.0)), "kPa"
     )
-    active_model = fenicsx_pulse.ActiveStress(geo.f0, activation=Ta)
+    # Add 30% transverse active stress
+    active_model = fenicsx_pulse.ActiveStress(geo.f0, activation=Ta, eta=0.3)
 
-    comp_model = fenicsx_pulse.Incompressible()
+    comp_model = fenicsx_pulse.Compressible()
 
     model = fenicsx_pulse.CardiacModel(
         material=material,
@@ -58,11 +61,13 @@ def main(
         mesh = geometry.mesh
         mesh.topology.create_connectivity(mesh.topology.dim - 1, mesh.topology.dim)
 
-        facets = geo.ffun.find(geometry.markers["BASE"][0])
-        dofs = dolfinx.fem.locate_dofs_topological(V, 2, facets)
-        u_fixed = dolfinx.fem.Function(V)
-        u_fixed.x.array[:] = 0.0
-        bcs = [dolfinx.fem.dirichletbc(u_fixed, dofs)]
+        bcs = []
+        for marker in ["MV", "TV", "AV", "PV"]:
+            facets = geo.ffun.find(geometry.markers[marker][0])
+            dofs = dolfinx.fem.locate_dofs_topological(V, 2, facets)
+            u_fixed = dolfinx.fem.Function(V)
+            u_fixed.x.array[:] = 0.0
+            bcs.append(dolfinx.fem.dirichletbc(u_fixed, dofs))
 
         return bcs
 
@@ -73,23 +78,19 @@ def main(
     robin_per = fenicsx_pulse.RobinBC(
         value=pericardium, marker=geometry.markers["EPI"][0]
     )
-    base = fenicsx_pulse.Variable(
-        dolfinx.fem.Constant(geometry.mesh, dolfinx.default_scalar_type(1e5)), "Pa / m"
-    )
-    robin_base = fenicsx_pulse.RobinBC(value=base, marker=geometry.markers["BASE"][0])
 
-    robin = (robin_per, robin_base)
+    robin = (robin_per,)
     # We collect all the boundary conditions
 
     bcs = fenicsx_pulse.BoundaryConditions(
-        neumann=(neumann_lv, neumann_rv),
-        robin=robin,  # dirichlet=(dirichlet_bc,)
+        neumann=(neumann_lv, neumann_rv), robin=robin, dirichlet=(dirichlet_bc,)
     )
 
     problem = fenicsx_pulse.StaticProblem(
         model=model,
         geometry=geometry,
         bcs=bcs,
+        parameters={"u_space": "P_2", "mesh_unit": "cm"},
     )
 
     problem.solve()
@@ -103,7 +104,7 @@ def main(
     PRV_ES = 3.0
     Ta_ES = 120.0
     # Number of steps to take. Just pick a high enough number so that we end without divergence
-    N = 20
+    N = 100
 
     for i, (plv, prv, tai) in enumerate(
         zip(
@@ -112,7 +113,9 @@ def main(
             np.linspace(0, Ta_ES, N),
         )
     ):
-        print(f"i: {i}, plv: {plv}, prv: {prv}, Ta: {tai}")
+        if geometry.mesh.comm.rank == 0:
+            print(f"i: {i}, plv: {plv}, prv: {prv}, Ta: {tai}", flush=True)
+
         adios4dolfinx.write_function(
             outdir / "u_checkpoint.bp", problem.u, time=float(i), name="displacement"
         )
