@@ -13,11 +13,12 @@ import cardiac_geometries.geometry
 
 def main(
     mode: int = -1,
+    case: str = "ED",
     datadir: Path = Path("data-full"),
     resultsdir: Path = Path("results-full"),
 ):
-    geodir = Path(datadir) / f"mode_{mode}"
-    outdir = Path(resultsdir) / f"mode_{mode}"
+    geodir = Path(datadir) / f"mode_{mode}" / case
+    outdir = Path(resultsdir) / f"mode_{mode}" / case
     outdir.mkdir(parents=True, exist_ok=True)
 
     log.set_log_level(log.LogLevel.INFO)
@@ -104,7 +105,7 @@ def main(
     PRV_ES = 3.0
     Ta_ES = 120.0
     # Number of steps to take. Just pick a high enough number so that we end without divergence
-    N = 100
+    N = 200
 
     for i, (plv, prv, tai) in enumerate(
         zip(
