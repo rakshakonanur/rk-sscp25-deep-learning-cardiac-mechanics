@@ -5,6 +5,7 @@ from mpi4py import MPI
 import adios4dolfinx
 import dolfinx
 import fenicsx_pulse
+
 import numpy as np
 from dolfinx import log
 import cardiac_geometries
@@ -16,6 +17,13 @@ def main(
     case: str = "ED",
     datadir: Path = Path("data-full"),
     resultsdir: Path = Path("results-full"),
+    PLV: np.array = [30.0, 40.0],
+    PRV: np.array = [6.0, 8.0],
+    TA: np.array = [0.0, 120.0],
+    N: np.array = [500, 200],
+    eta: float = 0.3,
+    a: np.array = [0.5, 2.280],
+    a_f: float = 1.685,
 ):
     geodir = Path(datadir) / f"mode_{mode}" / case
     outdir = Path(resultsdir) / f"mode_{mode}" / case
@@ -23,20 +31,20 @@ def main(
 
     log.set_log_level(log.LogLevel.INFO)
     geo = cardiac_geometries.geometry.Geometry.from_folder(
-        comm=MPI.COMM_WORLD, folder=geodir
+        comm=MPI.COMM_WORLD, folder=geodir  
     )
     geometry = fenicsx_pulse.Geometry.from_cardiac_geometries(
         geo, metadata={"quadrature_degree": 4}
     )
 
-    material_params = fenicsx_pulse.HolzapfelOgden.transversely_isotropic_parameters()
+    material_params = fenicsx_pulse.HolzapfelOgden.transversely_isotropic_parameters(a_val = a, a_f_val = a_f)
     material = fenicsx_pulse.HolzapfelOgden(f0=geo.f0, s0=geo.s0, **material_params)  # type: ignore
 
     Ta = fenicsx_pulse.Variable(
         dolfinx.fem.Constant(geometry.mesh, dolfinx.default_scalar_type(0.0)), "kPa"
     )
     # Add 30% transverse active stress
-    active_model = fenicsx_pulse.ActiveStress(geo.f0, activation=Ta, eta=0.3)
+    active_model = fenicsx_pulse.ActiveStress(geo.f0, activation=Ta, eta=eta)
 
     comp_model = fenicsx_pulse.Compressible()
 
@@ -101,19 +109,28 @@ def main(
     )
     vtx.write(0.0)
 
-    PLV_ES = 15.0
-    PRV_ES = 3.0
-    Ta_ES = 120.0
-    # Number of steps to take. Just pick a high enough number so that we end without divergence
-    N = 200
-
-    for i, (plv, prv, tai) in enumerate(
-        zip(
-            np.linspace(0, PLV_ES, N),
-            np.linspace(0, PRV_ES, N),
-            np.linspace(0, Ta_ES, N),
-        )
-    ):
+    # for i, (plv, prv, tai) in enumerate(
+    #     zip(
+    #         np.concatenate(np.linspace(0, PLV[0], N[0]), np.linspace(PLV[0], PLV[1], N[1])),
+    #         np.concatenate(np.linspace(0, PRV[0], N[0]), np.linspace(PRV[0], PRV[1], N[1])),
+    #         np.concatenate(np.linspace(0, TA[0], N[0]), np.linspace(TA[0], TA[1], N[1])),
+    #     )
+    # ):
+        
+    for i, (plv, prv, tai) in enumerate(zip(
+        np.concatenate([
+            np.linspace(0, PLV[0], N[0]),
+            np.linspace(PLV[0], PLV[1], N[1])
+        ]),
+        np.concatenate([
+            np.linspace(0, PRV[0], N[0]),
+            np.linspace(PRV[0], PRV[1], N[1])
+        ]),
+        np.concatenate([
+            np.linspace(0, TA[0],  N[0]),
+            np.linspace(TA[0],  TA[1], N[1])
+        ])
+    )):
         if geometry.mesh.comm.rank == 0:
             print(f"i: {i}, plv: {plv}, prv: {prv}, Ta: {tai}", flush=True)
 
