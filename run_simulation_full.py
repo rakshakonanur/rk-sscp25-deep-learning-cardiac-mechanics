@@ -10,6 +10,7 @@ import numpy as np
 from dolfinx import log
 import cardiac_geometries
 import cardiac_geometries.geometry
+from basix.ufl         import element
 
 
 def main(
@@ -92,11 +93,31 @@ def main(
         value=pericardium, marker=geometry.markers["EPI"][0]
     )
 
-    robin = (robin_per,)
+    MV = fenicsx_pulse.Variable(
+        dolfinx.fem.Constant(geometry.mesh, dolfinx.default_scalar_type(1e7)), "Pa / m"
+    )
+    robin_mv = fenicsx_pulse.RobinBC(value=MV, marker=geometry.markers["MV"][0])    
+
+    TV = fenicsx_pulse.Variable(
+        dolfinx.fem.Constant(geometry.mesh, dolfinx.default_scalar_type(1e7)), "Pa / m"
+    )
+    robin_tv = fenicsx_pulse.RobinBC(value=TV, marker=geometry.markers["TV"][0])    
+
+    AV = fenicsx_pulse.Variable(
+        dolfinx.fem.Constant(geometry.mesh, dolfinx.default_scalar_type(1e7)), "Pa / m"
+    )
+    robin_av = fenicsx_pulse.RobinBC(value=AV, marker=geometry.markers["AV"][0])
+
+    PV = fenicsx_pulse.Variable(
+        dolfinx.fem.Constant(geometry.mesh, dolfinx.default_scalar_type(1e7)), "Pa / m"
+    )
+    robin_pv = fenicsx_pulse.RobinBC(value=PV, marker=geometry.markers["PV"][0])
+
+    robin = (robin_per, robin_mv, robin_tv, robin_av, robin_pv)
     # We collect all the boundary conditions
 
     bcs = fenicsx_pulse.BoundaryConditions(
-        neumann=(neumann_lv, neumann_rv), robin=robin, dirichlet=(dirichlet_bc,)
+        neumann=(neumann_lv, neumann_rv), robin=robin
     )
 
     problem = fenicsx_pulse.StaticProblem(
@@ -109,10 +130,10 @@ def main(
     problem.solve()
 
     # Create 9 
-    # vtx = dolfinx.io.VTXWriter(
-    #     geometry.mesh.comm, outdir / f"PLV_{PLV[0]}__PRV_{PRV[0]}__a_{a}__af_{a_f}.bp", [problem.u], engine="BP4"
-    # )
-    # vtx.write(0.0)
+    vtx_ts = dolfinx.io.VTXWriter(
+        geometry.mesh.comm, outdir / f"displacement.bp", [problem.u], engine="BP4"
+    )
+    vtx_ts.write(0.0)
 
     # for i, (plv, prv, tai) in enumerate(
     #     zip(
@@ -156,40 +177,12 @@ def main(
     PLV_ES_vals = np.array([5.5, 16, 30])
     PRV_ES_vals = np.array([1.5, 2.67, 8])
 
-    # # Combine the ES arrays
-    # all_es_vals = np.concatenate([PLV_ED_vals, PRV_ED_vals])
-
-    # # Find values greater than both PLV[0] and PRV[0]
-    # threshold = max(PLV[0], PRV[0])
-    # filtered_vals = all_es_vals[all_es_vals > threshold]
-    # min_val = filtered_vals.min()
-    # print(f"Minimum value greater than {threshold}: {min_val}")
-
     ramp_steps_to_TA = 100  # Number of steps to ramp up to TA
     min_LV = PLV_ES_vals[PLV_ES_vals>PLV[0]].min()
     min_RV = PRV_ES_vals[PRV_ES_vals>PRV[0]].min()
 
-    # steps_LV = (min_LV - PLV[0]) / ramp_steps_to_TA
-    # steps_RV = (min_RV - PRV[0]) / ramp_steps_to_TA
-    # # Generate full PLV, PRV, TA profiles
-    # plv_vals = np.concatenate([
-    #     np.linspace(0, PLV[0], N[0]),
-    #     np.linspace(PLV[0], PLV[1], N[1])
-    # ])
-    # prv_vals = np.concatenate([
-    #     np.linspace(0, PRV[0], N[0]),
-    #     np.linspace(PRV[0], PRV[1], N[1])
-    # ])
-    # if PLV_ES_nonzero and PRV_ES_nonzero:
-    #     ramp_steps_to_TA = min(min(PLV_ES_nonzero), min(PRV_ES_nonzero))
-    # elif PLV_ES_nonzero:
-    #     ramp_steps_to_TA = min(PLV_ES_nonzero)
-    # elif PRV_ES_nonzero:
-    #     ramp_steps_to_TA = min(PRV_ES_nonzero)
-    # else:
-    #     raise ValueError("All ES indices are zero; cannot compute ramp_steps_to_TA.")
-# 
     ramp_steps_to_TA = 100  # Number of steps to ramp up to TA
+    count = 0
 
     plv_vals = np.concatenate([
         np.linspace(0, PLV[0], N[0]),
@@ -213,12 +206,6 @@ def main(
 
     PLV_ES_inds = find_closest_indices(plv_vals[N[0]:], PLV_ES_vals)
     PRV_ES_inds = find_closest_indices(prv_vals[N[0]:], PRV_ES_vals)
-    # print(f"Indices: {PLV_ED_inds}, {PRV_ED_inds}, {PLV_ES_inds}, {PRV_ES_inds}")
-
-    # # Compute minimum non-zero index
-    # # Filter out zero values
-    # PLV_ES_nonzero = [i for i in PLV_ES_inds if i != 0]
-    # PRV_ES_nonzero = [i for i in PRV_ES_inds if i != 0]
 
     # Shift ES indices since they start at N[0]
     PLV_ES_inds = [i + N[0] for i in PLV_ES_inds]
@@ -226,37 +213,92 @@ def main(
 
     # Merge unique write indices
     write_indices = set(PLV_ES_inds + PRV_ES_inds)
+    restarts = []
 
     # --- Main loop ---
     for i, (plv, prv, tai) in enumerate(zip(plv_vals, prv_vals, ta_vals)):
         if geometry.mesh.comm.rank == 0:
             print(f"i: {i}, plv: {plv}, prv: {prv}, Ta: {tai}", flush=True)
-
+        
+        vtx_ts.write(float(i))
         lvp.assign(plv)
         rvp.assign(prv)
         Ta.assign(tai)
         problem.solve()
 
-        # Write only if i is closest to one of the targets
-        if i in write_indices:
-            print(f"Saving pressures: plv: {plv}, prv: {prv}, Ta: {tai}", flush=True)
-            filename = (
-                f"PLVED_{PLV[0]:.1f}__PRVED_{PRV[0]:.1f}"
-                f"__PLVES_{plv:.2f}__PRVES_{prv:.2f}"
-                f"__TA_{tai:.2f}__a_{a:.2f}__af_{a_f:.2f}.bp"
-            )
 
+        # Write only if i is closest to one of the targets
+        if i in write_indices: 
+            if tai == 120:
+                print(f"Saving pressures: plv: {plv}, prv: {prv}, Ta: {tai}", flush=True)
+                filename = (
+                    f"PLVED_{PLV_ED_vals[count]:.2f}__PRVED_{PRV_ED_vals[count]:.2f}"
+                    f"__PLVES_{plv:.2f}__PRVES_{prv:.2f}"
+                    f"__TA_{tai:.1f}__a_{a:.2f}__af_{a_f:.2f}.bp"
+                )
+
+                vtx = dolfinx.io.VTXWriter(
+                    geometry.mesh.comm,
+                    outdir / filename,
+                    [problem.u],
+                    engine="BP4"
+                )
+
+                # with dolfinx.io.XDMFFile(geometry.mesh.comm, outdir / f"{filename}.xdmf", "w") as xdmf:
+                #     xdmf.write_mesh(geometry.mesh)
+                #     # Make a matching output space
+                #     V_out = dolfinx.fem.functionspace(geometry.mesh, element("Lagrange", geometry.mesh.basix_cell(), 1))
+
+                #     # Interpolate u to this space
+                #     u_out = dolfinx.fem.Function(V_out)
+                #     u_out.interpolate(problem.u)
+                #     xdmf.write_function(u_out, float(i))
+
+                if MPI.COMM_WORLD.rank == 0:
+                    x = problem.geometry.mesh.geometry.x
+                    displacement = problem.u.x.array.reshape((-1, 3))
+                    deformed_coords = x + displacement
+                    np.savetxt(f"{filename}.csv", deformed_coords, delimiter=",", header="X,Y,Z", comments='')
+                vtx.write(float(i))
+                vtx.close()
+            
+            else:
+                filename = (
+                    f"PLVED_{plv:.2f}__PRVED_{prv:.2f}"
+                    f"__TA_{tai:.1f}__a_{a:.2f}__af_{a_f:.2f}.bp"
+                )
+                adios4dolfinx.write_function(
+                    outdir / f"{filename}_checkpoint.bp", problem.u, time=float(i), name="displacement"
+                )
+                restarts.append(outdir / f"{filename}_checkpoint.bp")
+
+        # at last time point, restart with
+        if i == N[0] + N[1] - 1:
+    
+            # search in output folder 
+            adios4dolfinx.read_function(
+                outdir / restarts[count], problem.u, time=0, name="displacement"
+            )
+            
+            plv = PLV_ED_vals[count]
+            prv = PRV_ED_vals[count]
+            tai = TA[1]
+            count += 1
+            lvp.assign(plv)
+            rvp.assign(prv)
+            Ta.assign(tai)
+            problem.solve()
+            i = N[0]
             vtx = dolfinx.io.VTXWriter(
                 geometry.mesh.comm,
-                outdir / filename,
+                outdir / f"PLVED_{plv:.2f}__PRVED_{prv:.2f}__PLVES_{plv:.2f}__PRVES_{prv:.2f}__TA_{tai:.1f}__a_{a:.2f}__af_{a_f:.2f}.bp",
                 [problem.u],
                 engine="BP4"
             )
+            vtx.write(0.0)
 
-            vtx.write(float(i))
-            adios4dolfinx.write_function(
-                outdir / f"{filename}_checkpoint.bp", problem.u, time=float(i), name="displacement"
-            )
+        if count == len(restarts) - 1:
+            break
 
 if __name__ == "__main__":
     main()
