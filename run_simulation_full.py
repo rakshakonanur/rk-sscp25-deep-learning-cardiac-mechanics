@@ -108,10 +108,11 @@ def main(
 
     problem.solve()
 
-    vtx = dolfinx.io.VTXWriter(
-        geometry.mesh.comm, outdir / "displacement.bp", [problem.u], engine="BP4"
-    )
-    vtx.write(0.0)
+    # Create 9 
+    # vtx = dolfinx.io.VTXWriter(
+    #     geometry.mesh.comm, outdir / f"PLV_{PLV[0]}__PRV_{PRV[0]}__a_{a}__af_{a_f}.bp", [problem.u], engine="BP4"
+    # )
+    # vtx.write(0.0)
 
     # for i, (plv, prv, tai) in enumerate(
     #     zip(
@@ -155,36 +156,76 @@ def main(
     PLV_ES_vals = np.array([5.5, 16, 30])
     PRV_ES_vals = np.array([1.5, 2.67, 8])
 
-    # Generate full PLV, PRV, TA profiles
+    # # Combine the ES arrays
+    # all_es_vals = np.concatenate([PLV_ED_vals, PRV_ED_vals])
+
+    # # Find values greater than both PLV[0] and PRV[0]
+    # threshold = max(PLV[0], PRV[0])
+    # filtered_vals = all_es_vals[all_es_vals > threshold]
+    # min_val = filtered_vals.min()
+    # print(f"Minimum value greater than {threshold}: {min_val}")
+
+    ramp_steps_to_TA = 100  # Number of steps to ramp up to TA
+    min_LV = PLV_ES_vals[PLV_ES_vals>PLV[0]].min()
+    min_RV = PRV_ES_vals[PRV_ES_vals>PRV[0]].min()
+
+    # steps_LV = (min_LV - PLV[0]) / ramp_steps_to_TA
+    # steps_RV = (min_RV - PRV[0]) / ramp_steps_to_TA
+    # # Generate full PLV, PRV, TA profiles
+    # plv_vals = np.concatenate([
+    #     np.linspace(0, PLV[0], N[0]),
+    #     np.linspace(PLV[0], PLV[1], N[1])
+    # ])
+    # prv_vals = np.concatenate([
+    #     np.linspace(0, PRV[0], N[0]),
+    #     np.linspace(PRV[0], PRV[1], N[1])
+    # ])
+    # if PLV_ES_nonzero and PRV_ES_nonzero:
+    #     ramp_steps_to_TA = min(min(PLV_ES_nonzero), min(PRV_ES_nonzero))
+    # elif PLV_ES_nonzero:
+    #     ramp_steps_to_TA = min(PLV_ES_nonzero)
+    # elif PRV_ES_nonzero:
+    #     ramp_steps_to_TA = min(PRV_ES_nonzero)
+    # else:
+    #     raise ValueError("All ES indices are zero; cannot compute ramp_steps_to_TA.")
+# 
+    ramp_steps_to_TA = 100  # Number of steps to ramp up to TA
+
     plv_vals = np.concatenate([
         np.linspace(0, PLV[0], N[0]),
-        np.linspace(PLV[0], PLV[1], N[1])
+        np.linspace(PLV[0], min_LV, ramp_steps_to_TA),
+        np.linspace(min_LV, PLV[1], N[1] - ramp_steps_to_TA)  # Ensure we have enough steps
     ])
     prv_vals = np.concatenate([
         np.linspace(0, PRV[0], N[0]),
-        np.linspace(PRV[0], PRV[1], N[1])
+        np.linspace(PRV[0], min_RV, ramp_steps_to_TA),
+        np.linspace(min_RV, PRV[1], N[1] - ramp_steps_to_TA)  # Ensure we have enough steps
     ])
     ta_vals = np.concatenate([
-        np.linspace(0, TA[0],  N[0]),
-        np.linspace(TA[0],  TA[1], N[1])
+        np.linspace(0, TA[0], N[0]),
+        np.linspace(TA[0], TA[1], ramp_steps_to_TA),
+        np.full(N[1] - ramp_steps_to_TA, TA[1])
     ])
 
     # --- Find closest-matching indices ---
     def find_closest_indices(signal, targets):
-        return [np.argmin(np.abs(signal - val)) for val in targets]
+        return [np.argmin(np.abs(signal - val)) for val in targets] 
 
-    PLV_ED_inds = find_closest_indices(plv_vals[:N[0]], PLV_ED_vals)
-    PRV_ED_inds = find_closest_indices(prv_vals[:N[0]], PRV_ED_vals)
     PLV_ES_inds = find_closest_indices(plv_vals[N[0]:], PLV_ES_vals)
     PRV_ES_inds = find_closest_indices(prv_vals[N[0]:], PRV_ES_vals)
     # print(f"Indices: {PLV_ED_inds}, {PRV_ED_inds}, {PLV_ES_inds}, {PRV_ES_inds}")
+
+    # # Compute minimum non-zero index
+    # # Filter out zero values
+    # PLV_ES_nonzero = [i for i in PLV_ES_inds if i != 0]
+    # PRV_ES_nonzero = [i for i in PRV_ES_inds if i != 0]
 
     # Shift ES indices since they start at N[0]
     PLV_ES_inds = [i + N[0] for i in PLV_ES_inds]
     PRV_ES_inds = [i + N[0] for i in PRV_ES_inds]
 
     # Merge unique write indices
-    write_indices = set(PLV_ED_inds + PRV_ED_inds + PLV_ES_inds + PRV_ES_inds)
+    write_indices = set(PLV_ES_inds + PRV_ES_inds)
 
     # --- Main loop ---
     for i, (plv, prv, tai) in enumerate(zip(plv_vals, prv_vals, ta_vals)):
@@ -199,10 +240,23 @@ def main(
         # Write only if i is closest to one of the targets
         if i in write_indices:
             print(f"Saving pressures: plv: {plv}, prv: {prv}, Ta: {tai}", flush=True)
+            filename = (
+                f"PLVED_{PLV[0]:.1f}__PRVED_{PRV[0]:.1f}"
+                f"__PLVES_{plv:.2f}__PRVES_{prv:.2f}"
+                f"__TA_{tai:.2f}__a_{a:.2f}__af_{a_f:.2f}.bp"
+            )
+
+            vtx = dolfinx.io.VTXWriter(
+                geometry.mesh.comm,
+                outdir / filename,
+                [problem.u],
+                engine="BP4"
+            )
+
             vtx.write(float(i))
             adios4dolfinx.write_function(
-            outdir / "u_checkpoint.bp", problem.u, time=float(i), name="displacement"
-        )
+                outdir / f"{filename}_checkpoint.bp", problem.u, time=float(i), name="displacement"
+            )
 
 if __name__ == "__main__":
     main()
