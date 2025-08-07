@@ -29,6 +29,10 @@ def main(
     outdir = Path(resultsdir) / f"mode_{mode}" / case
     outdir.mkdir(parents=True, exist_ok=True)
 
+    # Print fenicsx_pulse path
+    # print fenicsx_pulse location
+    print(f"fenicsx_pulse location: {fenicsx_pulse.__file__}")
+
     log.set_log_level(log.LogLevel.INFO)
     geo = cardiac_geometries.geometry.Geometry.from_folder(
         comm=MPI.COMM_WORLD, folder=geodir  
@@ -117,34 +121,88 @@ def main(
     #     )
     # ):
         
-    for i, (plv, prv, tai) in enumerate(zip(
-        np.concatenate([
-            np.linspace(0, PLV[0], N[0]),
-            np.linspace(PLV[0], PLV[1], N[1])
-        ]),
-        np.concatenate([
-            np.linspace(0, PRV[0], N[0]),
-            np.linspace(PRV[0], PRV[1], N[1])
-        ]),
-        np.concatenate([
-            np.linspace(0, TA[0],  N[0]),
-            np.linspace(TA[0],  TA[1], N[1])
-        ])
-    )):
+    # for i, (plv, prv, tai) in enumerate(zip(
+    #     np.concatenate([
+    #         np.linspace(0, PLV[0], N[0]),
+    #         np.linspace(PLV[0], PLV[1], N[1])
+    #     ]),
+    #     np.concatenate([
+    #         np.linspace(0, PRV[0], N[0]),
+    #         np.linspace(PRV[0], PRV[1], N[1])
+    #     ]),
+    #     np.concatenate([
+    #         np.linspace(0, TA[0],  N[0]),
+    #         np.linspace(TA[0],  TA[1], N[1])
+    #     ])
+    # )):
+    #     if geometry.mesh.comm.rank == 0:
+    #         print(f"i: {i}, plv: {plv}, prv: {prv}, Ta: {tai}", flush=True)
+
+    #     # adios4dolfinx.write_function(
+    #     #     outdir / "u_checkpoint.bp", problem.u, time=float(i), name="displacement"
+    #     # )
+
+    #     lvp.assign(plv)
+    #     rvp.assign(prv)
+    #     Ta.assign(tai)
+    #     problem.solve()
+    #     vtx.write(float(i))
+    # vtx.close()
+
+    # --- Define targets ---
+    PLV_ED_vals = np.array([5, 10, 20])
+    PRV_ED_vals = np.array([1, 1.5, 4])
+    PLV_ES_vals = np.array([5.5, 16, 30])
+    PRV_ES_vals = np.array([1.5, 2.67, 8])
+
+    # Generate full PLV, PRV, TA profiles
+    plv_vals = np.concatenate([
+        np.linspace(0, PLV[0], N[0]),
+        np.linspace(PLV[0], PLV[1], N[1])
+    ])
+    prv_vals = np.concatenate([
+        np.linspace(0, PRV[0], N[0]),
+        np.linspace(PRV[0], PRV[1], N[1])
+    ])
+    ta_vals = np.concatenate([
+        np.linspace(0, TA[0],  N[0]),
+        np.linspace(TA[0],  TA[1], N[1])
+    ])
+
+    # --- Find closest-matching indices ---
+    def find_closest_indices(signal, targets):
+        return [np.argmin(np.abs(signal - val)) for val in targets]
+
+    PLV_ED_inds = find_closest_indices(plv_vals[:N[0]], PLV_ED_vals)
+    PRV_ED_inds = find_closest_indices(prv_vals[:N[0]], PRV_ED_vals)
+    PLV_ES_inds = find_closest_indices(plv_vals[N[0]:], PLV_ES_vals)
+    PRV_ES_inds = find_closest_indices(prv_vals[N[0]:], PRV_ES_vals)
+    # print(f"Indices: {PLV_ED_inds}, {PRV_ED_inds}, {PLV_ES_inds}, {PRV_ES_inds}")
+
+    # Shift ES indices since they start at N[0]
+    PLV_ES_inds = [i + N[0] for i in PLV_ES_inds]
+    PRV_ES_inds = [i + N[0] for i in PRV_ES_inds]
+
+    # Merge unique write indices
+    write_indices = set(PLV_ED_inds + PRV_ED_inds + PLV_ES_inds + PRV_ES_inds)
+
+    # --- Main loop ---
+    for i, (plv, prv, tai) in enumerate(zip(plv_vals, prv_vals, ta_vals)):
         if geometry.mesh.comm.rank == 0:
             print(f"i: {i}, plv: {plv}, prv: {prv}, Ta: {tai}", flush=True)
-
-        adios4dolfinx.write_function(
-            outdir / "u_checkpoint.bp", problem.u, time=float(i), name="displacement"
-        )
 
         lvp.assign(plv)
         rvp.assign(prv)
         Ta.assign(tai)
         problem.solve()
-        vtx.write(float(i))
-    vtx.close()
 
+        # Write only if i is closest to one of the targets
+        if i in write_indices:
+            print(f"Saving pressures: plv: {plv}, prv: {prv}, Ta: {tai}", flush=True)
+            vtx.write(float(i))
+            adios4dolfinx.write_function(
+            outdir / "u_checkpoint.bp", problem.u, time=float(i), name="displacement"
+        )
 
 if __name__ == "__main__":
     main()
