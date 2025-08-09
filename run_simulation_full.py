@@ -23,7 +23,7 @@ def main(
     TA: np.array = [0.0, 120.0],
     N: np.array = [500, 200],
     eta: float = 0.3,
-    a: np.array = [0.5, 2.280],
+    a: float = 2.280,
     a_f: float = 1.685,
 ):
     geodir = Path(datadir) / f"mode_{mode}" / case
@@ -42,7 +42,10 @@ def main(
         geo, metadata={"quadrature_degree": 4}
     )
 
+    
     material_params = fenicsx_pulse.HolzapfelOgden.transversely_isotropic_parameters(a_val = a, a_f_val = a_f)
+    
+    
     material = fenicsx_pulse.HolzapfelOgden(f0=geo.f0, s0=geo.s0, **material_params)  # type: ignore
 
     Ta = fenicsx_pulse.Variable(
@@ -93,31 +96,31 @@ def main(
         value=pericardium, marker=geometry.markers["EPI"][0]
     )
 
-    MV = fenicsx_pulse.Variable(
-        dolfinx.fem.Constant(geometry.mesh, dolfinx.default_scalar_type(1e7)), "Pa / m"
-    )
-    robin_mv = fenicsx_pulse.RobinBC(value=MV, marker=geometry.markers["MV"][0])    
+    # MV = fenicsx_pulse.Variable(
+    #     dolfinx.fem.Constant(geometry.mesh, dolfinx.default_scalar_type(1e9)), "Pa / m"
+    # )
+    # robin_mv = fenicsx_pulse.RobinBC(value=MV, marker=geometry.markers["MV"][0])    
 
-    TV = fenicsx_pulse.Variable(
-        dolfinx.fem.Constant(geometry.mesh, dolfinx.default_scalar_type(1e7)), "Pa / m"
-    )
-    robin_tv = fenicsx_pulse.RobinBC(value=TV, marker=geometry.markers["TV"][0])    
+    # TV = fenicsx_pulse.Variable(
+    #     dolfinx.fem.Constant(geometry.mesh, dolfinx.default_scalar_type(1e9)), "Pa / m"
+    # )
+    # robin_tv = fenicsx_pulse.RobinBC(value=TV, marker=geometry.markers["TV"][0])    
 
-    AV = fenicsx_pulse.Variable(
-        dolfinx.fem.Constant(geometry.mesh, dolfinx.default_scalar_type(1e7)), "Pa / m"
-    )
-    robin_av = fenicsx_pulse.RobinBC(value=AV, marker=geometry.markers["AV"][0])
+    # AV = fenicsx_pulse.Variable(
+    #     dolfinx.fem.Constant(geometry.mesh, dolfinx.default_scalar_type(1e9)), "Pa / m"
+    # )
+    # robin_av = fenicsx_pulse.RobinBC(value=AV, marker=geometry.markers["AV"][0])
 
-    PV = fenicsx_pulse.Variable(
-        dolfinx.fem.Constant(geometry.mesh, dolfinx.default_scalar_type(1e7)), "Pa / m"
-    )
-    robin_pv = fenicsx_pulse.RobinBC(value=PV, marker=geometry.markers["PV"][0])
+    # PV = fenicsx_pulse.Variable(
+    #     dolfinx.fem.Constant(geometry.mesh, dolfinx.default_scalar_type(1e9)), "Pa / m"
+    # )
+    # robin_pv = fenicsx_pulse.RobinBC(value=PV, marker=geometry.markers["PV"][0])
 
-    robin = (robin_per, robin_mv, robin_tv, robin_av, robin_pv)
+    robin = (robin_per,)#robin_mv, robin_tv, robin_av, robin_pv)
     # We collect all the boundary conditions
 
     bcs = fenicsx_pulse.BoundaryConditions(
-        neumann=(neumann_lv, neumann_rv), robin=robin
+        neumann=(neumann_lv, neumann_rv), robin=robin, dirichlet=(dirichlet_bc,)
     )
 
     problem = fenicsx_pulse.StaticProblem(
@@ -128,48 +131,7 @@ def main(
     )
 
     problem.solve()
-
-    # Create 9 
-    vtx_ts = dolfinx.io.VTXWriter(
-        geometry.mesh.comm, outdir / f"displacement.bp", [problem.u], engine="BP4"
-    )
-    vtx_ts.write(0.0)
-
-    # for i, (plv, prv, tai) in enumerate(
-    #     zip(
-    #         np.concatenate(np.linspace(0, PLV[0], N[0]), np.linspace(PLV[0], PLV[1], N[1])),
-    #         np.concatenate(np.linspace(0, PRV[0], N[0]), np.linspace(PRV[0], PRV[1], N[1])),
-    #         np.concatenate(np.linspace(0, TA[0], N[0]), np.linspace(TA[0], TA[1], N[1])),
-    #     )
-    # ):
-        
-    # for i, (plv, prv, tai) in enumerate(zip(
-    #     np.concatenate([
-    #         np.linspace(0, PLV[0], N[0]),
-    #         np.linspace(PLV[0], PLV[1], N[1])
-    #     ]),
-    #     np.concatenate([
-    #         np.linspace(0, PRV[0], N[0]),
-    #         np.linspace(PRV[0], PRV[1], N[1])
-    #     ]),
-    #     np.concatenate([
-    #         np.linspace(0, TA[0],  N[0]),
-    #         np.linspace(TA[0],  TA[1], N[1])
-    #     ])
-    # )):
-    #     if geometry.mesh.comm.rank == 0:
-    #         print(f"i: {i}, plv: {plv}, prv: {prv}, Ta: {tai}", flush=True)
-
-    #     # adios4dolfinx.write_function(
-    #     #     outdir / "u_checkpoint.bp", problem.u, time=float(i), name="displacement"
-    #     # )
-
-    #     lvp.assign(plv)
-    #     rvp.assign(prv)
-    #     Ta.assign(tai)
-    #     problem.solve()
-    #     vtx.write(float(i))
-    # vtx.close()
+    print(f"a: {a}, a_f:{a_f}")
 
     # --- Define targets ---
     PLV_ED_vals = np.array([5, 10, 20])
@@ -206,13 +168,15 @@ def main(
 
     PLV_ES_inds = find_closest_indices(plv_vals[N[0]:], PLV_ES_vals)
     PRV_ES_inds = find_closest_indices(prv_vals[N[0]:], PRV_ES_vals)
+    PLV_ED_inds = find_closest_indices(plv_vals[:N[0]], PLV_ED_vals)
+    PRV_ED_inds = find_closest_indices(prv_vals[:N[0]], PRV_ED_vals)
 
     # Shift ES indices since they start at N[0]
     PLV_ES_inds = [i + N[0] for i in PLV_ES_inds]
     PRV_ES_inds = [i + N[0] for i in PRV_ES_inds]
 
     # Merge unique write indices
-    write_indices = set(PLV_ES_inds + PRV_ES_inds)
+    write_indices = set(PLV_ES_inds + PRV_ES_inds + PLV_ED_inds + PRV_ED_inds)
     restarts = []
 
     # --- Main loop ---
@@ -220,7 +184,7 @@ def main(
         if geometry.mesh.comm.rank == 0:
             print(f"i: {i}, plv: {plv}, prv: {prv}, Ta: {tai}", flush=True)
         
-        vtx_ts.write(float(i))
+        # vtx_ts.write(float(i))
         lvp.assign(plv)
         rvp.assign(prv)
         Ta.assign(tai)
@@ -232,8 +196,8 @@ def main(
             if tai == 120:
                 print(f"Saving pressures: plv: {plv}, prv: {prv}, Ta: {tai}", flush=True)
                 filename = (
-                    f"PLVED_{PLV_ED_vals[count]:.2f}__PRVED_{PRV_ED_vals[count]:.2f}"
-                    f"__PLVES_{plv:.2f}__PRVES_{prv:.2f}"
+                    f"PLVED_{PLV[0]:.2f}__PRVED_{PRV[0]:.2f}"
+                    f"__PLVES_{plv:.4f}__PRVES_{prv:.4f}"
                     f"__TA_{tai:.1f}__a_{a:.2f}__af_{a_f:.2f}.bp"
                 )
 
@@ -243,62 +207,23 @@ def main(
                     [problem.u],
                     engine="BP4"
                 )
-
-                # with dolfinx.io.XDMFFile(geometry.mesh.comm, outdir / f"{filename}.xdmf", "w") as xdmf:
-                #     xdmf.write_mesh(geometry.mesh)
-                #     # Make a matching output space
-                #     V_out = dolfinx.fem.functionspace(geometry.mesh, element("Lagrange", geometry.mesh.basix_cell(), 1))
-
-                #     # Interpolate u to this space
-                #     u_out = dolfinx.fem.Function(V_out)
-                #     u_out.interpolate(problem.u)
-                #     xdmf.write_function(u_out, float(i))
-
-                if MPI.COMM_WORLD.rank == 0:
-                    x = problem.geometry.mesh.geometry.x
-                    displacement = problem.u.x.array.reshape((-1, 3))
-                    deformed_coords = x + displacement
-                    np.savetxt(f"{filename}.csv", deformed_coords, delimiter=",", header="X,Y,Z", comments='')
-                vtx.write(float(i))
+                vtx.write(0.0)
                 vtx.close()
-            
-            else:
+            elif plv == PLV[0]:
+                print(f"Saving unloaded to ED pressures: plv: {plv}, prv: {prv}, Ta: {tai}", flush=True)
                 filename = (
-                    f"PLVED_{plv:.2f}__PRVED_{prv:.2f}"
+                    f"unloaded_to_ED_PLVED_{plv:.2f}__PRVED_{prv:.2f}"
                     f"__TA_{tai:.1f}__a_{a:.2f}__af_{a_f:.2f}.bp"
                 )
-                adios4dolfinx.write_function(
-                    outdir / f"{filename}_checkpoint.bp", problem.u, time=float(i), name="displacement"
+
+                vtx = dolfinx.io.VTXWriter(
+                    geometry.mesh.comm,
+                    outdir / filename,
+                    [problem.u],
+                    engine="BP4"
                 )
-                restarts.append(outdir / f"{filename}_checkpoint.bp")
-
-        # at last time point, restart with
-        if i == N[0] + N[1] - 1:
-    
-            # search in output folder 
-            adios4dolfinx.read_function(
-                outdir / restarts[count], problem.u, time=0, name="displacement"
-            )
-            
-            plv = PLV_ED_vals[count]
-            prv = PRV_ED_vals[count]
-            tai = TA[1]
-            count += 1
-            lvp.assign(plv)
-            rvp.assign(prv)
-            Ta.assign(tai)
-            problem.solve()
-            i = N[0]
-            vtx = dolfinx.io.VTXWriter(
-                geometry.mesh.comm,
-                outdir / f"PLVED_{plv:.2f}__PRVED_{prv:.2f}__PLVES_{plv:.2f}__PRVES_{prv:.2f}__TA_{tai:.1f}__a_{a:.2f}__af_{a_f:.2f}.bp",
-                [problem.u],
-                engine="BP4"
-            )
-            vtx.write(0.0)
-
-        if count == len(restarts) - 1:
-            break
+                vtx.write(0.0)
+                vtx.close()
 
 if __name__ == "__main__":
     main()
