@@ -179,6 +179,13 @@ def main(
     write_indices = set(PLV_ES_inds + PRV_ES_inds + PLV_ED_inds + PRV_ED_inds)
     restarts = []
 
+    vtx_save = dolfinx.io.VTXWriter(
+                    geometry.mesh.comm,
+                    outdir / "displacement.bp",
+                    [problem.u],
+                    engine="BP4"
+                )
+
     # --- Main loop ---
     for i, (plv, prv, tai) in enumerate(zip(plv_vals, prv_vals, ta_vals)):
         if geometry.mesh.comm.rank == 0:
@@ -189,6 +196,7 @@ def main(
         rvp.assign(prv)
         Ta.assign(tai)
         problem.solve()
+        vtx_save.write(float(i))
 
 
         # Write only if i is closest to one of the targets
@@ -198,12 +206,16 @@ def main(
                 filename = (
                     f"PLVED_{PLV[0]:.2f}__PRVED_{PRV[0]:.2f}"
                     f"__PLVES_{plv:.4f}__PRVES_{prv:.4f}"
-                    f"__TA_{tai:.1f}__a_{a:.2f}__af_{a_f:.2f}.bp"
+                    f"__TA_{tai:.1f}__a_{a:.2f}__af_{a_f:.2f}"
                 )
+                adios4dolfinx.write_function(
+                    outdir / f"{filename}.bp", problem.u, time=float(i), name="displacement"
+                )
+
 
                 vtx = dolfinx.io.VTXWriter(
                     geometry.mesh.comm,
-                    outdir / filename,
+                    outdir / f"{filename}.bp",
                     [problem.u],
                     engine="BP4"
                 )
@@ -213,17 +225,21 @@ def main(
                 print(f"Saving unloaded to ED pressures: plv: {plv}, prv: {prv}, Ta: {tai}", flush=True)
                 filename = (
                     f"unloaded_to_ED_PLVED_{plv:.2f}__PRVED_{prv:.2f}"
-                    f"__TA_{tai:.1f}__a_{a:.2f}__af_{a_f:.2f}.bp"
+                    f"__TA_{tai:.1f}__a_{a:.2f}__af_{a_f:.2f}"
                 )
-
+                adios4dolfinx.write_function(
+                    outdir / f"{filename}.bp", problem.u, time=float(i), name="displacement"
+                )
                 vtx = dolfinx.io.VTXWriter(
                     geometry.mesh.comm,
-                    outdir / filename,
+                    outdir / f"{filename}.bp",
                     [problem.u],
                     engine="BP4"
                 )
                 vtx.write(0.0)
                 vtx.close()
 
+    vtx_save.close()
+    
 if __name__ == "__main__":
     main()
