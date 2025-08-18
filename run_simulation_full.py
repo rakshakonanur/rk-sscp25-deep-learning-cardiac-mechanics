@@ -131,7 +131,8 @@ def main(
     )
 
     problem.solve()
-    print(f"a: {a}, a_f:{a_f}")
+    if geometry.mesh.comm.rank == 0:
+        print(f"a: {a}, a_f:{a_f}")
 
     # --- Define targets ---
     PLV_ED_vals = np.array([5, 10, 20])
