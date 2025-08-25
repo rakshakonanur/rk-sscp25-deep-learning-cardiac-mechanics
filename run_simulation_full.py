@@ -90,7 +90,7 @@ def main(
 
     # Could alternatively use a Robin BC
     pericardium = fenicsx_pulse.Variable(
-        dolfinx.fem.Constant(geometry.mesh, dolfinx.default_scalar_type(1e5)), "Pa / m"
+        dolfinx.fem.Constant(geometry.mesh, dolfinx.default_scalar_type(1e1)), "Pa / m"
     )
     robin_per = fenicsx_pulse.RobinBC(
         value=pericardium, marker=geometry.markers["EPI"][0]
@@ -135,27 +135,31 @@ def main(
         print(f"a: {a}, a_f:{a_f}")
 
     # --- Define targets ---
-    PLV_ED_vals = np.array([5, 10, 20])
-    PRV_ED_vals = np.array([1, 1.5, 4])
-    PLV_ES_vals = np.array([5.5, 16, 30])
-    PRV_ES_vals = np.array([1.5, 2.67, 8])
+    PLV_ED_vals = np.array([0.8, 1.2, 1.6])
+    PRV_ED_vals = PLV_ED_vals/2.25
+    PLV_ES_vals = np.array([14, 18, 25])
+    PRV_ES_vals = np.array([2, 3, 4])
 
-    ramp_steps_to_TA = 100  # Number of steps to ramp up to TA
-    min_LV = PLV_ES_vals[PLV_ES_vals>PLV[0]].min()
-    min_RV = PRV_ES_vals[PRV_ES_vals>PRV[0]].min()
+    # ramp_steps_to_TA = 600  # Number of steps to ramp up to TA
+    # min_LV = PLV_ES_vals[PLV_ES_vals>PLV[0]].min()
+    # min_RV = PRV_ES_vals[PRV_ES_vals>PRV[0]].min()
 
-    ramp_steps_to_TA = 100  # Number of steps to ramp up to TA
+    ramp_steps_to_TA = np.round(0.5*N[1]).astype(int)  # Number of steps to ramp up to TA
+    steps_to_mid = np.round(0.2*N[1]).astype(int)
+    steps_to_high = N[1] - ramp_steps_to_TA - steps_to_mid
     count = 0
 
     plv_vals = np.concatenate([
         np.linspace(0, PLV[0], N[0]),
-        np.linspace(PLV[0], min_LV, ramp_steps_to_TA),
-        np.linspace(min_LV, PLV[1], N[1] - ramp_steps_to_TA)  # Ensure we have enough steps
+        np.linspace(PLV[0], PLV_ES_vals[0], ramp_steps_to_TA),
+        np.linspace(PLV_ES_vals[0], PLV_ES_vals[1], steps_to_mid),
+        np.linspace(PLV_ES_vals[1], PLV[1], steps_to_high)  # Ensure we have enough steps
     ])
     prv_vals = np.concatenate([
         np.linspace(0, PRV[0], N[0]),
-        np.linspace(PRV[0], min_RV, ramp_steps_to_TA),
-        np.linspace(min_RV, PRV[1], N[1] - ramp_steps_to_TA)  # Ensure we have enough steps
+        np.linspace(PRV[0], PRV_ES_vals[0], ramp_steps_to_TA),
+        np.linspace(PRV_ES_vals[0], PRV_ES_vals[1], steps_to_mid),
+        np.linspace(PRV_ES_vals[1], PRV[1], steps_to_high)  # Ensure we have enough steps
     ])
     ta_vals = np.concatenate([
         np.linspace(0, TA[0], N[0]),
@@ -180,12 +184,12 @@ def main(
     write_indices = set(PLV_ES_inds + PRV_ES_inds + PLV_ED_inds + PRV_ED_inds)
     restarts = []
 
-    vtx_save = dolfinx.io.VTXWriter(
-                    geometry.mesh.comm,
-                    outdir / "displacement.bp",
-                    [problem.u],
-                    engine="BP4"
-                )
+    # vtx_save = dolfinx.io.VTXWriter(
+                #     geometry.mesh.comm,
+                #     outdir / "displacement.bp",
+                #     [problem.u],
+                #     engine="BP4"
+                # )
 
     # --- Main loop ---
     for i, (plv, prv, tai) in enumerate(zip(plv_vals, prv_vals, ta_vals)):
@@ -197,20 +201,20 @@ def main(
         rvp.assign(prv)
         Ta.assign(tai)
         problem.solve()
-        vtx_save.write(float(i))
+        # vtx_save.write(float(i))
 
 
         # Write only if i is closest to one of the targets
         if i in write_indices: 
-            if tai == 120:
+            if tai == TA[1]:
                 print(f"Saving pressures: plv: {plv}, prv: {prv}, Ta: {tai}", flush=True)
                 filename = (
                     f"PLVED_{PLV[0]:.2f}__PRVED_{PRV[0]:.2f}"
                     f"__PLVES_{plv:.4f}__PRVES_{prv:.4f}"
-                    f"__TA_{tai:.1f}__a_{a:.2f}__af_{a_f:.2f}"
+                    f"__TA_{tai:.1f}__eta_{eta:.1f}__a_{a:.2f}__af_{a_f:.2f}"
                 )
                 adios4dolfinx.write_function(
-                    outdir / f"{filename}.bp", problem.u, time=float(i), name="displacement"
+                    outdir / f"{filename}_checkpoint.bp", problem.u, time=float(i), name="displacement"
                 )
 
 
@@ -226,10 +230,10 @@ def main(
                 print(f"Saving unloaded to ED pressures: plv: {plv}, prv: {prv}, Ta: {tai}", flush=True)
                 filename = (
                     f"unloaded_to_ED_PLVED_{plv:.2f}__PRVED_{prv:.2f}"
-                    f"__TA_{tai:.1f}__a_{a:.2f}__af_{a_f:.2f}"
+                    f"__TA_{tai:.1f}__eta_{eta:.1f}__a_{a:.2f}__af_{a_f:.2f}"
                 )
                 adios4dolfinx.write_function(
-                    outdir / f"{filename}.bp", problem.u, time=float(i), name="displacement"
+                    outdir / f"{filename}_checkpoint.bp", problem.u, time=float(i), name="displacement"
                 )
                 vtx = dolfinx.io.VTXWriter(
                     geometry.mesh.comm,
@@ -240,7 +244,7 @@ def main(
                 vtx.write(0.0)
                 vtx.close()
 
-    vtx_save.close()
+    # vtx_save.close()
     
 if __name__ == "__main__":
     main()
